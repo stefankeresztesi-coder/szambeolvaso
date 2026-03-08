@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>AI Számolvasó - HU & RO</title>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js"></script>
+    <style>
+        body { margin: 0; font-family: 'Segoe UI', Roboto, sans-serif; background: #000; color: white; overflow: hidden; height: 100vh; display: flex; flex-direction: column; }
+        #video { width: 100%; height: 100%; object-fit: cover; position: absolute; z-index: 1; }
+        .overlay { 
+            position: absolute; z-index: 2; top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            border: 3px solid #00ff00; width: 85%; height: 120px;
+            box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.6);
+            border-radius: 15px; pointer-events: none;
+        }
+        .controls { 
+            position: absolute; bottom: 40px; z-index: 3; width: 100%; 
+            display: flex; flex-direction: column; align-items: center; gap: 15px;
+        }
+        #result-container { 
+            background: rgba(255, 255, 255, 0.15); backdrop-filter: blur(10px);
+            padding: 20px; border-radius: 20px; width: 80%; text-align: center;
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+        #status { font-size: 0.85em; text-transform: uppercase; letter-spacing: 1px; color: #00ff00; margin-bottom: 5px; display: block; }
+        #number-display { font-size: 1.8em; font-weight: bold; min-height: 2em; color: #fff; }
+        .call-btn { 
+            display: none; padding: 18px 50px; background: #28a745; color: white; 
+            text-decoration: none; border-radius: 50px; font-weight: bold; 
+            font-size: 1.4em; box-shadow: 0 4px 15px rgba(40, 167, 69, 0.4);
+        }
+    </style>
+</head>
+<body>
+
+    <video id="video" autoplay playsinline></video>
+    <div class="overlay"></div>
+    <canvas id="canvas" style="display:none;"></canvas>
+
+    <div class="controls">
+        <div id="result-container">
+            <span id="status">Keresés (HU/RO)...</span>
+            <div id="number-display">Irányítsd a keretet a számra</div>
+        </div>
+        <a href="#" id="call-link" class="call-btn">HÍVÁS INDÍTÁSA</a>
+    </div>
+
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const status = document.getElementById('status');
+        const numberDisplay = document.getElementById('number-display');
+        const callLink = document.getElementById('call-link');
+
+        navigator.mediaDevices.getUserMedia({ 
+            video: { facingMode: "environment", focusMode: "continuous" } 
+        })
+        .then(stream => { 
+            video.srcObject = stream; 
+            setInterval(processFrame, 2000); 
+        })
+        .catch(err => { 
+            status.innerText = "Hiba: Nincs kamera hozzáférés!";
+        });
+
+        async function processFrame() {
+            const context = canvas.getContext('2d');
+            const scanWidth = video.videoWidth * 0.8;
+            const scanHeight = 200;
+            const startX = (video.videoWidth - scanWidth) / 2;
+            const startY = (video.videoHeight - scanHeight) / 2;
+
+            canvas.width = scanWidth;
+            canvas.height = scanHeight;
+            context.drawImage(video, startX, startY, scanWidth, scanHeight, 0, 0, scanWidth, scanHeight);
+            
+            try {
+                const { data: { text } } = await Tesseract.recognize(canvas, 'eng', {
+                    tessedit_char_whitelist: '0123456789+ -',
+                });
+
+                let cleanedNum = text.replace(/[^0-9+]/g, '');
+
+                // Kombinált Regex: 
+                // HU: +36... vagy 06...
+                // RO: +40... vagy 07... (mobil), 02.../03... (vezetékes)
+                const phoneRegex = /(?:\+36|06|\+40|07|02|03)[0-9]{8,10}/;
+                const match = cleanedNum.match(phoneRegex);
+
+                if (match) {
+                    const finalNumber = match[0];
+                    numberDisplay.innerHTML = finalNumber;
+                    callLink.href = "tel:" + finalNumber;
+                    callLink.style.display = "block";
+                    status.innerText = "Szám megtalálva!";
+                } else {
+                    status.innerText = "Szkennelés...";
+                }
+            } catch (e) {
+                console.error(e);
+            }
+        }
+    </script>
+</body>
+</html>
