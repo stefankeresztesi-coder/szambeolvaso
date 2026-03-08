@@ -3,53 +3,63 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>AI Számolvasó - HU & RO</title>
+    <title>AI Számolvasó PRO - HU & RO</title>
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js"></script>
     <style>
-        body { margin: 0; font-family: 'Segoe UI', Roboto, sans-serif; background: #000; color: white; overflow: hidden; height: 100vh; display: flex; flex-direction: column; }
+        body { margin: 0; font-family: 'Segoe UI', sans-serif; background: #000; color: white; overflow: hidden; height: 100vh; display: flex; flex-direction: column; }
         #video { width: 100%; height: 100%; object-fit: cover; position: absolute; z-index: 1; }
+        
+        /* Célkereszt */
         .overlay { 
             position: absolute; z-index: 2; top: 50%; left: 50%;
             transform: translate(-50%, -50%);
-            border: 3px solid #00ff00; width: 85%; height: 120px;
-            box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.6);
+            border: 3px solid #00ff00; width: 85%; height: 140px;
+            box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.7);
             border-radius: 15px; pointer-events: none;
         }
+
+        /* Kontroll panel */
         .controls { 
-            position: absolute; bottom: 40px; z-index: 3; width: 100%; 
-            display: flex; flex-direction: column; align-items: center; gap: 15px;
+            position: absolute; bottom: 30px; z-index: 3; width: 100%; 
+            display: flex; flex-direction: column; align-items: center; gap: 10px;
         }
+
         #result-container { 
-            background: rgba(255, 255, 255, 0.15); backdrop-filter: blur(10px);
-            padding: 20px; border-radius: 20px; width: 80%; text-align: center;
-            border: 1px solid rgba(255,255,255,0.2);
+            background: rgba(0, 0, 0, 0.8); padding: 15px; border-radius: 15px; 
+            width: 85%; text-align: center; border: 1px solid #333;
         }
-        #status { font-size: 0.85em; text-transform: uppercase; letter-spacing: 1px; color: #00ff00; margin-bottom: 5px; display: block; }
-        #number-display { font-size: 1.8em; font-weight: bold; min-height: 2em; color: #fff; }
+
+        #status { font-size: 0.8em; color: #00ff00; text-transform: uppercase; margin-bottom: 5px; display: block; }
+        #number-display { font-size: 2em; font-weight: bold; color: #fff; margin: 10px 0; letter-spacing: 2px; }
+
         .call-btn { 
-            display: none; padding: 18px 50px; background: #28a745; color: white; 
+            display: none; padding: 20px; background: #28a745; color: white; 
             text-decoration: none; border-radius: 50px; font-weight: bold; 
-            font-size: 1.4em; box-shadow: 0 4px 15px rgba(40, 167, 69, 0.4);
+            font-size: 1.5em; width: 80%; text-align: center;
+            box-shadow: 0 5px 20px rgba(40, 167, 69, 0.5);
         }
+
+        /* Rejtett segédvászon a képjavításhoz */
+        #preprocess-canvas { display: none; }
     </style>
 </head>
 <body>
 
     <video id="video" autoplay playsinline></video>
     <div class="overlay"></div>
-    <canvas id="canvas" style="display:none;"></canvas>
+    <canvas id="preprocess-canvas"></canvas>
 
     <div class="controls">
         <div id="result-container">
-            <span id="status">Keresés (HU/RO)...</span>
-            <div id="number-display">Irányítsd a keretet a számra</div>
+            <span id="status">Kézírás javítás aktív (HU/RO)</span>
+            <div id="number-display">Szkennelés...</div>
         </div>
         <a href="#" id="call-link" class="call-btn">HÍVÁS INDÍTÁSA</a>
     </div>
 
     <script>
         const video = document.getElementById('video');
-        const canvas = document.getElementById('canvas');
+        const canvas = document.getElementById('preprocess-canvas');
         const status = document.getElementById('status');
         const numberDisplay = document.getElementById('number-display');
         const callLink = document.getElementById('call-link');
@@ -57,50 +67,61 @@
         navigator.mediaDevices.getUserMedia({ 
             video: { facingMode: "environment", focusMode: "continuous" } 
         })
-        .then(stream => { 
-            video.srcObject = stream; 
-            setInterval(processFrame, 2000); 
-        })
-        .catch(err => { 
-            status.innerText = "Hiba: Nincs kamera hozzáférés!";
-        });
+        .then(stream => { video.srcObject = stream; setInterval(processFrame, 1500); })
+        .catch(err => { status.innerText = "Kamera hiba!"; });
 
         async function processFrame() {
-            const context = canvas.getContext('2d');
+            const ctx = canvas.getContext('2d');
+            
+            // Kép kivágása a keretnek megfelelően
+            const scale = video.videoWidth / window.innerWidth;
             const scanWidth = video.videoWidth * 0.8;
-            const scanHeight = 200;
+            const scanHeight = 250;
             const startX = (video.videoWidth - scanWidth) / 2;
             const startY = (video.videoHeight - scanHeight) / 2;
 
             canvas.width = scanWidth;
             canvas.height = scanHeight;
-            context.drawImage(video, startX, startY, scanWidth, scanHeight, 0, 0, scanWidth, scanHeight);
+            ctx.drawImage(video, startX, startY, scanWidth, scanHeight, 0, 0, scanWidth, scanHeight);
+
+            // --- KÉPJAVÍTÓ ALGORITMUS (Kézíráshoz) ---
+            let imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            let data = imageData.data;
             
+            for (let i = 0; i < data.length; i += 4) {
+                // Szürkeárnyalat készítése
+                let avg = (data[i] + data[i + 1] + data[i + 2]) / 3;
+                // Thresholding: Ha sötét, legyen fekete, ha világos, legyen tiszta fehér
+                let val = avg < 120 ? 0 : 255; 
+                data[i] = data[i + 1] = data[i + 2] = val;
+            }
+            ctx.putImageData(imageData, 0, 0);
+            // ----------------------------------------
+
             try {
                 const { data: { text } } = await Tesseract.recognize(canvas, 'eng', {
                     tessedit_char_whitelist: '0123456789+ -',
+                    tessedit_pageseg_mode: '7', // Egy soros szövegként kezelje
                 });
 
                 let cleanedNum = text.replace(/[^0-9+]/g, '');
 
-                // Kombinált Regex: 
-                // HU: +36... vagy 06...
-                // RO: +40... vagy 07... (mobil), 02.../03... (vezetékes)
+                // HU és RO hívószám felismerés
                 const phoneRegex = /(?:\+36|06|\+40|07|02|03)[0-9]{8,10}/;
                 const match = cleanedNum.match(phoneRegex);
 
                 if (match) {
                     const finalNumber = match[0];
-                    numberDisplay.innerHTML = finalNumber;
+                    numberDisplay.innerText = finalNumber;
                     callLink.href = "tel:" + finalNumber;
                     callLink.style.display = "block";
-                    status.innerText = "Szám megtalálva!";
+                    status.innerText = "TALÁLAT!";
+                    status.style.color = "#00ff00";
                 } else {
-                    status.innerText = "Szkennelés...";
+                    status.innerText = "KERESÉS...";
+                    status.style.color = "#aaa";
                 }
-            } catch (e) {
-                console.error(e);
-            }
+            } catch (e) { console.error(e); }
         }
     </script>
 </body>
